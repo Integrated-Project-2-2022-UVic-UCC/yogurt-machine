@@ -6,8 +6,8 @@
 #include <WebServer.h>
 #include <ESPmDNS.h>
 //------------------ Stepper motor --------------------------//
-#define STEP 12      // pin STEP de A4988 a pin 3
-#define DIR 14     // pin DIR de A4988 a pin 4
+#define STEP 12      // pin STEP de A4988 a pin 12
+#define DIR 14     // pin DIR de A4988 a pin 14
 #define A 200     //distancia dispensador 1
 #define B 400     //distancia dispensador 2     
 #define C 800     //distancia dispensador 3
@@ -110,8 +110,8 @@ void handleNotFound() {
 
 void setup(void) {
   Serial.begin(115200);
-  pinMode(STEP, OUTPUT);  // pin 3 como salida
-  pinMode(DIR, OUTPUT);   // pin 4 como salida
+  pinMode(STEP, OUTPUT);  // pin 12 como salida
+  pinMode(DIR, OUTPUT);   // pin 14 como salida
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
   Serial.println("");
