@@ -1,1 +1,154 @@
+//--------------------LLIBRERIES-----------------------------//
 
+//---------------------Servidor-----------------------------//
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
+//------------------ Stepper motor --------------------------//
+#define STEP 12      // pin STEP de A4988 a pin 3
+#define DIR 14     // pin DIR de A4988 a pin 4
+#define A 200     //distancia dispensador 1
+#define B 400     //distancia dispensador 2     
+#define C 800     //distancia dispensador 3
+#define D 1000     //distancia dispensador 4
+#define E 1200     //distancia dispensador 5
+#define F 1400     //distancia dispensador 6
+int dist=0;      //posició inicial stepper motor 
+
+//----------------------Inicialitzem variables-----------------------//
+
+
+
+const char* ssid = "AndroidAPd6d2";
+const char* password = "hheb8034";
+
+WebServer server(80);
+
+//---------------------------Funcions--------------------------//
+void girAntihorari(int dist){
+  digitalWrite(DIR, HIGH);    // giro en el sentido antihorario
+  for(int i = 0; i < dist; i++){
+    digitalWrite(STEP, HIGH);       // nivel alto
+    delay(1); //velocitat de gir
+    
+    digitalWrite(STEP, LOW);        // nivel bajo
+    delay(1);
+  }
+}
+
+void dispensadorA(){
+  girAntihorari(A);
+  delay(5000);
+  handleRoot();
+}
+void dispensadorB(){
+  girAntihorari(B);
+  delay(5000);
+  handleRoot();
+}
+void dispensadorC(){
+  girAntihorari(C);
+  delay(5000);
+  handleRoot();
+}
+void dispensadorD(){
+  girAntihorari(D);
+  delay(5000);
+  handleRoot();
+}
+void dispensadorE(){
+  girAntihorari(E);
+  delay(5000);
+  handleRoot();
+}
+void dispensadorF(){
+  girAntihorari(F);
+  delay(5000);
+  handleRoot();
+}
+
+void handleRoot() {
+  //Codi HTML per a la personalització de la web
+String inici = "<html>";
+inici += "<head>";
+inici += "</head>";
+inici += "<body>";
+inici += "<table>";
+inici += "<tr>";
+inici += "<td><input type=""button"" value=""Dispenser_A"" onclick=""javascript:location.href='dispensadorA'""></td>";
+inici += "<td><input type=""button"" value=""Dispenser_B"" onclick=""javascript:location.href='dispensadorB'""></td>";
+inici += "</tr>";
+inici += "<tr>";
+inici += "<td><input type=""button"" value=""Dispenser_C"" onclick=""javascript:location.href='dispensadorC'""></td>";
+inici += "<td><input type=""button"" value=""Dispenser_D"" onclick=""javascript:location.href='dispensadorD'""></td>";
+inici += "</tr>";
+inici += "<tr>";
+inici += "<td><input type=""button"" value=""Dispenser_E"" onclick=""javascript:location.href='dispensadorE'""></td>";
+inici += "<td><input type=""button"" value=""Dispenser_F"" onclick=""javascript:location.href='dispensadorF'""></td>";
+inici += "</tr>";
+inici += "</table>";
+inici += "</body>";
+inici += "</html>";
+  server.send(200, "text/html", inici);
+}
+
+void handleNotFound() {
+  String message = "File Not Found\n\n";
+  message += "URI: ";
+  message += server.uri();
+  message += "\nMethod: ";
+  message += (server.method() == HTTP_GET) ? "GET" : "POST";
+  message += "\nArguments: ";
+  message += server.args();
+  message += "\n";
+  for (uint8_t i = 0; i < server.args(); i++) {
+    message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+  }
+  server.send(404, "text/plain", message);
+}
+
+void setup(void) {
+  Serial.begin(115200);
+  pinMode(STEP, OUTPUT);  // pin 3 como salida
+  pinMode(DIR, OUTPUT);   // pin 4 como salida
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password);
+  Serial.println("");
+  
+  //  Esperar a la connexió
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.print("Connected to ");
+  Serial.println(ssid);
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP()); //Imprimim la IP per poder accedir a la pàgina 
+
+  if (MDNS.begin("esp32")) {
+    Serial.println("MDNS responder started");
+  }
+
+  server.on("/", handleRoot);
+
+  server.on("/inline", []() {
+    server.send(200, "text/plain", "this works as well");
+  });
+
+  server.onNotFound(handleNotFound);
+  server.on("/dispensadorA", HTTP_GET, dispensadorA);
+  server.on("/dispensadorB", HTTP_GET, dispensadorB);
+  server.on("/dispensadorC", HTTP_GET, dispensadorC);
+  server.on("/dispensadorD", HTTP_GET, dispensadorD);
+  server.on("/dispensadorE", HTTP_GET, dispensadorE);
+  server.on("/dispensadorF", HTTP_GET, dispensadorF); 
+  server.begin();
+  Serial.println("HTTP server started");
+}
+
+void loop(void) {
+  server.handleClient();
+  delay(2);
+}
