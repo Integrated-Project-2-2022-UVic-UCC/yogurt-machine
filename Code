@@ -20,8 +20,8 @@ int dist=0;      //posició inicial stepper motor
 
 
 
-const char* ssid = "AndroidAPd6d2";
-const char* password = "hheb8034";
+const char* ssid = "";
+const char* password = "";
 
 WebServer server(80);
 
