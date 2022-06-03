@@ -1,0 +1,428 @@
+//LLIBRERIES//
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
+
+//CONSTANTS//
+#define DISPENSER_COUNT 7         //quantitat de dispensadors (6) + Yogurt
+#define YOGURT_DISTANCE 950       //distancia yogur
+#define DISPENSER_A     1933      //distancia dispensador 1
+#define DISPENSER_B     2875      //distancia dispensador 2
+#define DISPENSER_C     3835      //distancia dispensador 3
+#define DISPENSER_D     4820      //distancia dispensador 4
+#define DISPENSER_E     5780      //distancia dispensador 5
+
+#define PUMP 15       //pin de la bomba al pin 15
+#define ENDSTOP1 33   //pin final de carrera 1 - Inici recorregut
+#define ENDSTOP2 32   //pin final de carrera 2 - Final recorregut
+#define ENDSTOP3 35   //pin final de carrera 3 - Inici cremallera    
+#define ENABLE 13     //pin ENABLE del DRV8825 al pin 13
+#define ENABLE2 25    //pin ENABLE2 del DRV8825 al pin 25
+#define STEP 12       //pin STEP del DRV8825 a pin 12
+#define DIR 14        //pin DIR de DRV8825 a pin 14
+#define STEP2 27      //pin STEP2 del segon driver al pin 27
+#define DIR2 26       //pin DIR2 del segon driver al pin 26
+
+//ESTRUCTURA DEL DISPENSADOR//
+typedef struct dispenser {
+    bool selected;
+    String description;
+} dispenser;
+bool running = false;
+dispenser dispensadores[DISPENSER_COUNT]; //llista de dispensadors 
+const char * ssid = "Lab-Modul";
+const char * password = "dgK672sd";
+WebServer server(80);
+
+//FUNCIONS SERVIDOR//
+void handle_root();           //Imprimeix la pàgina principal
+void handle_not_found();      //Imprimeix la pàgina 404
+void handle_dispenser();      //Canvia l'estat del dispensador (True/False)
+void handle_start();          //Iniciar proces de la comanda 
+void dispenser_setup();       //Llista de dispensadors (noms toppins)
+void server_setup();          //Inicialitzar servidor 
+
+
+//FUNCIONS MOTORS//
+void girCremalleraAnada(){           //moviment del segon motor
+  digitalWrite(ENABLE2, LOW);        //activem el motor 2
+  digitalWrite(DIR2, LOW);           //gir en el sentit horari
+  for(int i = 0; i < 130; i++){      //dist=130
+    digitalWrite(STEP2, HIGH);       //nivell alt
+    delay(1);                        //velocitat de gir
+    digitalWrite(STEP2, LOW);        //nivell baix
+    delay(1);
+  }
+  delay(200);                       //esperem que caiguin els toppings
+  digitalWrite(ENABLE2, HIGH);       //desctivem el motor 2
+}
+
+void girCremalleraTornada(){         //moviment del segon motor 
+  digitalWrite(ENABLE2, LOW);        //activem el motor 2
+  digitalWrite(DIR2, HIGH);          //gir en el sentit antihorari
+  digitalWrite(STEP2, HIGH);         //nivell alt
+  delay(1);                          //velocitat de gir
+  digitalWrite(STEP2, LOW);          //nivell baix
+  delay(1);
+  digitalWrite(ENABLE2, HIGH);       //desactivem el motor 2
+}
+
+void girHorari(){                  //moviment del stepper motor principal
+  digitalWrite(ENABLE, LOW);       //activem el motor 1
+  digitalWrite(DIR, LOW);          //gir en el sentit horari
+  digitalWrite(STEP, HIGH);        //nivell alt
+  delay(1);                        //velocitat de gir
+  digitalWrite(STEP, LOW);         //nivell baix
+  delay(1);
+  digitalWrite(ENABLE, HIGH);      //desactivem el motor 1
+}
+
+void girAntihorari(int dist){       //moviment del stepper motor principal
+  digitalWrite(ENABLE, LOW);        //activem el motor 1
+  digitalWrite(DIR, HIGH);          //gir en el sentit antihorari
+  for(int i = 0; i < dist; i++){ 
+    digitalWrite(STEP, HIGH);       //nivell alt
+    delay(1);                       //velocitat de gir
+    digitalWrite(STEP, LOW);        //nivell baix
+    delay(1);
+  }
+  digitalWrite(ENABLE, HIGH);       //desactivem el motor 1
+}
+void Start(){
+    
+    if (digitalRead(ENDSTOP3)==LOW or digitalRead(ENDSTOP1)==LOW){        //mentre la cremallera no estigui a la seva posició
+      while (digitalRead(ENDSTOP3)==LOW) {
+        girCremalleraTornada();
+      }
+    }
+    if (digitalRead(ENDSTOP1)==LOW){        //mentre el transportador no estigui a la seva posició
+      while (digitalRead(ENDSTOP1)==LOW) {
+        girHorari();
+      }
+    }
+    girAntihorari(YOGURT_DISTANCE);  //el transportador va cap al yogurt
+        digitalWrite(PUMP, HIGH);        //activacio de la bomba
+        delay(30000);                    //temps per omplir el iogurt 10 seg
+        digitalWrite(PUMP, LOW);         //desctivacio de la bomba
+        delay(500);                      //espera per a que acabi de caure el iogurt
+        
+        
+    if (digitalRead(ENDSTOP1)==LOW){        //mentre el transportador no estigui a la seva posició
+      while (digitalRead(ENDSTOP1)==LOW) {
+        girHorari();
+      }
+    }
+  
+}
+
+//MAIN//
+void setup() 
+{
+  //ESTABLIR ENTRADES I SORTIDES//
+    pinMode(ENDSTOP1, INPUT); //pin 33 com a entrada
+    pinMode(ENDSTOP2, INPUT); //pin 32 com a entrada
+    pinMode(ENDSTOP3, INPUT); //pin 35 com a entrada
+    pinMode(PUMP, OUTPUT);    //pin 15 com a sortida
+    pinMode(STEP, OUTPUT);    //pin 12 com a sortida
+    pinMode(DIR, OUTPUT);     //pin 14 com a sortida
+    pinMode(STEP2, OUTPUT);   //pin 27 com a sortida
+    pinMode(DIR2, OUTPUT);    //pin 26 com a sortida
+    pinMode(ENABLE2, OUTPUT); //pin 25 com a sortida
+    pinMode(ENABLE, OUTPUT);  //pin 13 com a sortida
+
+  //INICIALITZACIÓ DEL SERVIDOR-ESP32//
+    Serial.begin(115200);
+    delay(2000);
+
+    Serial.println("[Info] iniciando setup...");
+    running = false;
+
+    Serial.println("[Info] iniciando setup dispensers...");
+    dispenser_setup();
+
+    Serial.println("[Info] iniciando setup server...");
+    server_setup(); 
+    Start();
+}
+
+void loop() {
+ 
+    
+    if (digitalRead(ENDSTOP3)==LOW or digitalRead(ENDSTOP1)==LOW){        //mentre la cremallera no estigui a la seva posició
+      while (digitalRead(ENDSTOP3)==LOW) {
+        girCremalleraTornada();
+      }
+    }
+    if (digitalRead(ENDSTOP1)==LOW){        //mentre el transportador no estigui a la seva posició
+      while (digitalRead(ENDSTOP1)==LOW) {
+        girHorari();
+      }
+    }
+ 
+    
+    server.handleClient();    
+    delay(2);//allow the cpu to switch to other tasks         
+    if (running) 
+    {
+        int cur_distance = 0;
+        int pos_final = 0;
+        
+        
+        //PREPARACIO DEL IOGURT//  
+        girAntihorari(YOGURT_DISTANCE);  //el transportador va cap al yogurt
+        digitalWrite(PUMP, HIGH);        //activacio de la bomba
+        delay(180000);                    //temps per omplir el iogurt 10 seg
+        digitalWrite(PUMP, LOW);         //desctivacio de la bomba
+        delay(500);                      //espera per a que acabi de caure el iogurt
+        cur_distance=YOGURT_DISTANCE;    //actualitzar la distància del transportador 
+
+        if (dispensadores[1].selected==1){      //si s'ha seleccionat el topping 1
+          pos_final=DISPENSER_A-cur_distance;   //calculem la distancia entre la posicio actual i a la que volem anar
+          girAntihorari(pos_final);             //moven el transportador a la posicio del diposit
+          delay(200);                           //temps de seguretat de posicio
+          girCremalleraAnada();                 //moven la cremallera per obrir el diposit
+          delay(200);                           //temps de seguretat de posicio
+          if (digitalRead(ENDSTOP3)==LOW){      //mentre la cremallera no estigui a la seva posició
+            while (digitalRead(ENDSTOP3)==LOW) {
+              girCremalleraTornada();
+            }
+          }
+          cur_distance=DISPENSER_A;             //actualitzar la distància del transportador 
+        }
+        if (dispensadores[2].selected==1){      //si s'ha seleccionat el topping 2
+          pos_final=DISPENSER_B-cur_distance;   //calculem la distancia entre la posicio actual i a la que volem anar
+          girAntihorari(pos_final);             //moven el transportador a la posicio del diposit
+          delay(200);                           //temps de seguretat de posicio
+          girCremalleraAnada();                 //moven la cremallera per obrir el diposit
+          delay(200);                           //temps de seguretat de posicio
+          if (digitalRead(ENDSTOP3)==LOW){      //mentre la cremallera no estigui a la seva posició
+            while (digitalRead(ENDSTOP3)==LOW) {
+              girCremalleraTornada();
+            }
+          }
+          cur_distance=DISPENSER_B;             //actualitzar la distància del transportador
+        }
+        if (dispensadores[3].selected==1){      //si s'ha seleccionat el topping 3
+          pos_final=DISPENSER_C-cur_distance;   //calculem la distancia entre la posicio actual i a la que volem anar
+          girAntihorari(pos_final);             //moven el transportador a la posicio del diposit
+          delay(200);                           //temps de seguretat de posicio
+          girCremalleraAnada();                 //moven la cremallera per obrir el diposit
+          delay(200);                           //temps de seguretat de posicio
+          if (digitalRead(ENDSTOP3)==LOW){      //mentre la cremallera no estigui a la seva posició
+            while (digitalRead(ENDSTOP3)==LOW) {
+              girCremalleraTornada();
+            }
+          }
+          cur_distance=DISPENSER_C;             //actualitzar la distància del transportador
+        }
+        if (dispensadores[4].selected==1){      //si s'ha seleccionat el topping 4
+          pos_final=DISPENSER_D-cur_distance;   //calculem la distancia entre la posicio actual i a la que volem anar
+          girAntihorari(pos_final);             //moven el transportador a la posicio del diposit
+          delay(200);                           //temps de seguretat de posicio
+          girCremalleraAnada();                 //moven la cremallera per obrir el diposit
+          delay(200);                           //temps de seguretat de posicio
+          if (digitalRead(ENDSTOP3)==LOW){      //mentre la cremallera no estigui a la seva posició
+            while (digitalRead(ENDSTOP3)==LOW) {
+              girCremalleraTornada();
+            }
+          }
+          cur_distance=DISPENSER_D;             //actualitzar la distància del transportador
+        }
+        if (dispensadores[5].selected==1){      //si s'ha seleccionat el topping 5
+          pos_final=DISPENSER_E-cur_distance;   //calculem la distancia entre la posicio actual i a la que volem anar
+          girAntihorari(pos_final);             //moven el transportador a la posicio del diposit
+          delay(200);                           //temps de seguretat de posicio
+          girCremalleraAnada();                 //moven la cremallera per obrir el diposit
+          delay(200);                           //temps de seguretat de posicio
+          if (digitalRead(ENDSTOP3)==LOW){      //mentre la cremallera no estigui a la seva posició
+            while (digitalRead(ENDSTOP3)==LOW) {
+              girCremalleraTornada();
+            }
+          }
+          cur_distance=DISPENSER_E;             //actualitzar la distància del transportador
+        }
+        if (dispensadores[6].selected==1){      //si s'ha seleccionat el topping 6
+          if (digitalRead(ENDSTOP2)==LOW){      //mentre la cremallera no estigui a la seva posició
+            while (digitalRead(ENDSTOP2)==LOW) {
+              girAntihorari(1);                 //moven el transportador a la posicio del diposit
+            }
+          }
+          delay(200);                           //temps de seguretat de posicio
+          girCremalleraAnada();                 //moven la cremallera per obrir el diposit
+          delay(200);                           //temps de seguretat de posicio
+          if (digitalRead(ENDSTOP3)==LOW){      //mentre la cremallera no estigui a la seva posició
+            while (digitalRead(ENDSTOP3)==LOW) {
+              girCremalleraTornada();
+            }
+          }
+        }
+        if (digitalRead(ENDSTOP1)==LOW){        //mentre el transportador no estigui a la seva posició
+          while (digitalRead(ENDSTOP1)==LOW) {
+            girHorari();
+          }
+        }
+        //desactiven la selecció dels toppings previs//
+        dispensadores[1].selected=false;
+        dispensadores[2].selected=false;
+        dispensadores[3].selected=false;
+        dispensadores[4].selected=false;
+        dispensadores[5].selected=false;
+        dispensadores[6].selected=false;
+        running = false;
+    }
+}
+
+//FUNCIONS DEL SERVER//
+void handle_root() 
+{
+    Serial.println("[Server] Handling root...");
+    //DISSENY DE LA PAGINA AMB CODI HTML//
+    /*<html>
+        <head>
+        </head>
+        <body>
+          <table> 
+            <tr>  fila
+              <td>  columna
+                <...>  dispensadors
+              </td>
+            </tr>
+          </table>
+            <...>  botó start
+         </body>
+       </html>
+    */
+    String page = "<html><head></head><body><table>";   
+    int mod;
+    for (int i = 1; i < DISPENSER_COUNT; i++)
+    {
+        mod = i % 2;
+        page += (mod == 1) ? "<tr>" : "";
+        page += "<td>";
+        page += "<input id=""";
+        page += i;
+        //al executar l'event onclick es redirecciona a la pagina /dispenser?id=[i]
+        page += """ type=""checkbox"" onclick=""javascript:location.href='dispenser?id=";  
+        page += i;
+        page += "'"" ";
+        page += (dispensadores[i].selected) ? "checked" : "";
+        page += "><label for=""";
+        page += i;
+        page += """>";
+        page += dispensadores[i].description;
+        page += "</label>";
+        page += "</td>";
+        page += (mod == 0) ? "</tr>" : "";
+        
+    }
+
+    page += "<tr><td>";
+    //al executar l'event onclick es redirecciona a la pagina /start
+    page += "<input type=""button"" value=""Preparar"" onclick=""javascript:location.href='start'"">";
+    page += "</td></tr>";
+
+    page += "</table></body></html>";
+
+    server.send(200, "text/html", page); //enviar la pagina al client
+}
+//Imprimeix la pàgina 404//
+void handle_not_found() 
+{
+    Serial.println("[Server] Handling not found...");
+    String message = "File Not Found\n\n";
+
+    message += "URI: ";
+    message += server.uri();
+    message += "\nMethod: ";
+    message += (server.method() == HTTP_GET) ? "GET" : "POST";
+    message += "\nArguments: ";
+    message += server.args();
+    message += "\n";
+
+    for (uint8_t i = 0; i < server.args(); i++)
+        message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
+
+    server.send(404, "text/plain", message);
+}
+
+void handle_dispenser()
+{
+    int id = server.arg("id").toInt();  //obtenir el paràmetre id de la URL
+    String message = "[Server] Handling " + dispensadores[id].description + "...";
+    Serial.println(message);
+    //en cas que no s'estigui executant poder modificar l'estat de la selecció del topping
+    if (!running){
+        dispensadores[id].selected = !dispensadores[id].selected;
+    }
+    handle_root(); //imprimir la pàgina de nou 
+}
+
+void handle_start()
+{
+    Serial.println("[Server] Handling start..."); 
+    running = true;  //un cop s'ha clicat el preparar, comença el proces
+    handle_root(); //imprimir la pàgina de nou 
+}
+
+void dispenser_setup()
+{
+    //inicialitza les variables dels toppings en false
+    dispensadores[0].selected = false;  
+    dispensadores[1].selected = false;  
+    dispensadores[2].selected = false;
+    dispensadores[3].selected = false;
+    dispensadores[4].selected = false;
+    dispensadores[5].selected = false;
+    dispensadores[6].selected = false;
+    
+    //definim el nom dels toppings 
+    dispensadores[0].description = "Dispensador Yogurt";
+    dispensadores[1].description = "1- Galetes";
+    dispensadores[2].description = "2- Choco Krispis";
+    dispensadores[3].description = "3- Banana";
+    dispensadores[4].description = "4- Cereals";
+    dispensadores[5].description = "5- Galetes de xocolata";
+    dispensadores[6].description = "6- Lacasitos";
+}
+
+void server_setup()
+{
+    WiFi.mode(WIFI_STA);  //estableix el mode WIFI a mode WIFI STA
+    WiFi.begin(ssid, password);  //inicia la connexió 
+    Serial.println("[Info] Waiting for wifi connection...");
+    
+    //espera a la connexio
+    while (WiFi.status() != WL_CONNECTED){
+      delay(500);
+      Serial.print(".");
+    }
+
+    Serial.println("");
+    Serial.print("[Info] Connected to ");
+    Serial.println(ssid);
+    Serial.print("[Info] IP address: ");
+    Serial.println(WiFi.localIP());
+
+    if (MDNS.begin("esp32")) {
+        Serial.println("[Info] MDNS responder started");
+    }
+    //deineix la funció per encarregar-se del callback del cliente
+    //i s'executa el handle_root quan s'accedeix a la pagina principal
+    server.on("/", handle_root);  
+    
+    //deineix la funció per encarregar-se del callback del cliente
+    //i s'executa el handle_dispenser quan s'accedeix a la pagina /dispenser
+    server.on("/dispenser", HTTP_GET, handle_dispenser);
+    
+    //deineix la funció per encarregar-se del callback del cliente
+    //i s'executa el handle_start quan s'accedeix a la pagina /start
+    server.on("/start", HTTP_GET, handle_start);
+    
+    //deineix la funció per encarregar-se del callback del cliente
+    //i s'executa el handle_not_found quan no es troba la pagina
+    server.onNotFound(handle_not_found);
+
+    server.begin(); //inicia al servidor 
+    Serial.println("[Info] HTTP server started");
+}
